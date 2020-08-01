@@ -5,20 +5,20 @@ const Web3 = require('web3');
 const HDWalletProvider = require('@truffle/hdwallet-provider');
 const moment = require('moment');
 
-// ABIs
-const ABIS = require('./abis');
 
 // .env 
 const {
   SERVER_PORT,
   RPC_URL,
   PRIV_KEY,
-  ADDRESS
+  ADDRESS,
+  POLLING_INTERVAL
 } = process.env;
 
 // ABIs
+const ABIS = require('./abis');
 const {
-  DAI_ABI,
+  ERC20_ABI,
   UNISWAP_ABI
 } = ABIS;
 
@@ -29,29 +29,35 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Bot Listening 
+app.listen(SERVER_PORT, () => console.log(`Bot is starting up on Port ${SERVER_PORT}`));
+
 // Web3 Init
 const web3 = new Web3(new HDWalletProvider(PRIV_KEY, RPC_URL));
 
-// Constract Instances (Ropsten)
+// Constract Addresses (Ropsten)
 const DAI_ADDRESS = '0xad6d458402f60fd3bd25163575031acdce07538d';
 const UNISWAP_ADDRESS = '0xc0fc958f7108be4060F33a699a92d3ea49b0B5f0';
 
-const daiContract = new web3.eth.Contract(DAI_ABI, DAI_ADDRESS);
+// Contract Instances
+const daiContract = new web3.eth.Contract(ERC20_ABI, DAI_ADDRESS);
 const uniswapV1DaiContract = new web3.eth.Contract(UNISWAP_ABI, UNISWAP_ADDRESS);
 
+// Trade Parameters
+const ethTradeAmount = web3.utils.toWei('0.1', 'Ether');
+const ethSellPrice = web3.utils.toWei('300', 'Ether')
+
 const tradeEthForDai = async () => {
-  const ethAmount = web3.utils.toWei('0.001', 'Ether');
-  const daiAmount = await uniswapV1DaiContract.methods.getEthToTokenInputPrice(ethAmount).call()
+  const daiAmount = await uniswapV1DaiContract.methods.getEthToTokenInputPrice(ethTradeAmount).call()
   console.log('Trade found, swapping Eth for Dai...');
   const now = moment().unix();
-  const DEADLINE = now + 600;
-  // console.log("Deadline", DEADLINE);
+  const DEADLINE = now + 60; // 1 min deadline
 
   const SETTINGS = {
     gasLimit: 900000,
     gasPrice: web3.utils.toWei('50', 'Gwei'),
     from: ADDRESS,
-    value: ethAmount
+    value: ethTradeAmount
   }
 
   try{
@@ -64,6 +70,52 @@ const tradeEthForDai = async () => {
   }
 }
 
-app.listen(SERVER_PORT, () => console.log(`Bot is starting up on Port ${SERVER_PORT}`));
+const checkBalances = async () => {
+  let balance;
 
-tradeEthForDai();
+  balance = await web3.eth.getBalance(ADDRESS);
+  balance = web3.utils.fromWei(balance, 'Ether');
+  console.log("Eth Balance:", balance);
+
+  balance = await daiContract.methods.balanceOf(ADDRESS).call();
+  balance = web3.utils.fromWei(balance, 'Ether');
+  console.log('Dai Balance:', balance);
+}
+
+let priceMonitor;
+let monitoringPrice = false;
+
+const monitorPrice = async () => {
+  if(monitoringPrice) {
+    return
+  }
+
+  console.log('Checking price...');
+  monitoringPrice = true;
+
+  try {
+    const daiAmount = await uniswapV1DaiContract.methods.getEthToTokenInputPrice(ethTradeAmount).call();
+    const price = web3.utils.fromWei(daiAmount.toString(), 'Ether');
+    console.log('Eth Price:', price, 'DAI');
+
+    if(price <= ethSellPrice) {
+      console.log('Selling Eth...');
+      await checkBalances();
+
+      await tradeEthForDai(ethTradeAmount, daiAmount);
+
+      await checkBalances();
+    }
+  }
+  catch (error){
+    console.error(error);
+    monitoringPrice = false;
+    clearInterval(priceMonitor);
+    return;
+  }
+
+  monitoringPrice = false
+}
+
+const pollingInterval = POLLING_INTERVAL || 1000;
+priceMonitor = setInterval(async () => {await monitorPrice()}, pollingInterval);
