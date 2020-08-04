@@ -19,7 +19,9 @@ const {
 const ABIS = require('./abis');
 const {
   ERC20_ABI,
-  UNISWAP_ABI
+  UNISWAP_EXCHANGE_ABI,
+  KYBER_RATE_ABI,
+  UNISWAP_FACTORY_ABI
 } = ABIS;
 
 // App Instance
@@ -35,13 +37,13 @@ app.listen(SERVER_PORT, () => console.log(`Bot is starting up on Port ${SERVER_P
 // Web3 Init
 const web3 = new Web3(new HDWalletProvider(PRIV_KEY, RPC_URL));
 
-// Constract Addresses (Ropsten)
-const DAI_ADDRESS = '0xad6d458402f60fd3bd25163575031acdce07538d';
-const UNISWAP_ADDRESS = '0xc0fc958f7108be4060F33a699a92d3ea49b0B5f0';
+// Constract Addresses (Mainnet)
+const UNISWAP_FACTORY_ADDRESS = '0xc0a47dfe034b400b47bdad5fecda2621de6c4d95'
+const KYBER_RATE_ADDRESS = '0x96b610046d63638d970e6243151311d8827d69a5'
 
 // Contract Instances
-const daiContract = new web3.eth.Contract(ERC20_ABI, DAI_ADDRESS);
-const uniswapV1DaiContract = new web3.eth.Contract(UNISWAP_ABI, UNISWAP_ADDRESS);
+const kyberRateContract = new web3.eth.Contract(KYBER_RATE_ABI, KYBER_RATE_ADDRESS)
+const uniswapV1FactoryContract = new web3.eth.Contract(UNISWAP_FACTORY_ABI, UNISWAP_FACTORY_ADDRESS)
 
 // Trade Parameters
 const ethTradeAmount = web3.utils.toWei('0.1', 'Ether');
@@ -70,16 +72,31 @@ const tradeEthForDai = async () => {
   }
 }
 
-const checkBalances = async () => {
-  let balance;
 
-  balance = await web3.eth.getBalance(ADDRESS);
-  balance = web3.utils.fromWei(balance, 'Ether');
-  console.log("Eth Balance:", balance);
+const checkPair = async (args) => {
+  const { 
+    inputTokenSymbol, 
+    inputTokenAddress, 
+    outputTokenSymbol, 
+    outputTokenAddress, 
+    inputAmount 
+  } = args;
+  
+  const exchangeAddress = await uniswapV1FactoryContract.methods.getExchange(outputTokenAddress).call()
+  const exchangeContract = new web3.eth.Contract(UNISWAP_EXCHANGE_ABI, exchangeAddress);
 
-  balance = await daiContract.methods.balanceOf(ADDRESS).call();
-  balance = web3.utils.fromWei(balance, 'Ether');
-  console.log('Dai Balance:', balance);
+  const uniswapResult = await exchangeContract.methods.getEthToTokenInputPrice(inputAmount).call();
+  let kyberResult = await kyberRateContract.methods.getExpectedRate(inputTokenAddress, outputTokenAddress, inputAmount, true).call();
+
+  console.table([{
+    'Input Token': inputTokenSymbol,
+    'Output Token': outputTokenSymbol,
+    'Input Amount': web3.utils.fromWei(inputAmount, 'Ether'),
+    'Uniswap Return': web3.utils.fromWei(uniswapResult, 'Ether'),
+    'Kyber Expected Rate': web3.utils.fromWei(kyberResult.expectedRate, 'Ether'),
+    'Kyber Min Return': web3.utils.fromWei(kyberResult.slippageRate, 'Ether'),
+    'Time': moment().format()
+  }])
 }
 
 let priceMonitor;
@@ -90,31 +107,26 @@ const monitorPrice = async () => {
     return
   }
 
-  console.log('Checking price...');
   monitoringPrice = true;
 
-  try {
-    const daiAmount = await uniswapV1DaiContract.methods.getEthToTokenInputPrice(ethTradeAmount).call();
-    const price = web3.utils.fromWei(daiAmount.toString(), 'Ether');
-    console.log('Eth Price:', price, 'DAI');
-
-    if(price <= ethSellPrice) {
-      console.log('Selling Eth...');
-      await checkBalances();
-
-      await tradeEthForDai(ethTradeAmount, daiAmount);
-
-      await checkBalances();
-    }
+  try{
+    await checkPair({
+      inputTokenSymbol: 'ETH',
+      inputTokenAddress: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      outputTokenSymbol: 'DAI',
+      outputTokenAddress: '0x6b175474e89094c44da98b954eedeac495271d0f',
+      inputAmount: web3.utils.toWei('1', 'ETHER')
+    })
   }
-  catch (error){
+
+  catch(error) {
     console.error(error);
     monitoringPrice = false;
     clearInterval(priceMonitor);
-    return;
+    return
   }
 
-  monitoringPrice = false
+  monitoringPrice = false;
 }
 
 const pollingInterval = POLLING_INTERVAL || 1000;
