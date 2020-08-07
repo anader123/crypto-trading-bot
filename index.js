@@ -4,6 +4,7 @@ const cors = require('cors');
 const Web3 = require('web3');
 const HDWalletProvider = require('@truffle/hdwallet-provider');
 const moment = require('moment');
+const arbContractABI = require('./build/contracts/ArbContract.json');
 
 
 // .env 
@@ -49,7 +50,9 @@ const uniswapV1FactoryContract = new web3.eth.Contract(UNISWAP_FACTORY_ABI, UNIS
 const ethTradeAmount = web3.utils.toWei('0.1', 'Ether');
 const ethSellPrice = web3.utils.toWei('300', 'Ether')
 
+// Ropsten
 const tradeEthForDai = async () => {
+  const uniswapV1DaiContract = new web3.eth.Contract(UNISWAP_EXCHANGE_ABI, '0xc0fc958f7108be4060F33a699a92d3ea49b0B5f0')
   const daiAmount = await uniswapV1DaiContract.methods.getEthToTokenInputPrice(ethTradeAmount).call()
   console.log('Trade found, swapping Eth for Dai...');
   const now = moment().unix();
@@ -130,4 +133,26 @@ const monitorPrice = async () => {
 }
 
 const pollingInterval = POLLING_INTERVAL || 1000;
-priceMonitor = setInterval(async () => {await monitorPrice()}, pollingInterval);
+// priceMonitor = setInterval(async () => {await monitorPrice()}, pollingInterval);
+
+const callContract = async () => {
+  try{
+    const ropstenDaiAddress = '0xad6d458402f60fd3bd25163575031acdce07538d';
+    const daiContract = new web3.eth.Contract(ERC20_ABI, ropstenDaiAddress);
+    const daiBalance1 = await daiContract.methods.balanceOf('0x76a8B390A2463D82fcE1c28334f91D454F555470').call();
+    const arbContract = new web3.eth.Contract(arbContractABI.abi, '0xac7b26de7c04858684766d2c0390ceeee1a2220a');
+    const result = await arbContract.methods.arbOnKyberToUniswap(ropstenDaiAddress).send({
+      from: '0x76a8B390A2463D82fcE1c28334f91D454F555470',
+      gasLimit: web3.utils.toHex(150000),      // posted at compound.finance/developers#gas-costs
+      gasPrice: web3.utils.toHex(20000000000)
+    });
+    console.log(result.transactionHash);
+    const daiBalance2 = await daiContract.methods.balanceOf('0x76a8B390A2463D82fcE1c28334f91D454F555470').call();
+    console.log(daiBalance1, daiBalance2);
+  }
+  catch (error) {
+    console.log(error);
+  }
+}
+
+callContract();
