@@ -27,6 +27,13 @@ interface UNI {
     function tokenToEthTransferOutput(uint256 eth_bought, uint256 max_tokens, uint256 deadline, address recipient) external returns (uint256  tokens_sold);
 }
 
+// interface GasToken {
+//   function free(uint256 value) public returns (bool success);
+//   function freeUpTo(uint256 value) public returns (uint256 freed);
+//   function freeFrom(address from, uint256 value) public returns (bool success);
+//   function freeFromUpTo(address from, uint256 value) public returns (uint256 freed);
+// }
+
 contract ArbContract {
   address owner; // creater of the contract
   IERC20 ERC20; // ERC20 token instance
@@ -38,6 +45,10 @@ contract ArbContract {
     }
     _;
   }
+
+  // function burnGasAndFree(address gas_token, uint256 free) public {
+  //   require(Gastoken(gas_token).free(free));
+  // }
 
   constructor() public {
     owner = msg.sender;
